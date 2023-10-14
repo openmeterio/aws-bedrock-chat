@@ -3,17 +3,73 @@
   "root": true,
   "extends": [
     "next/core-web-vitals",
+    "plugin:react/recommended",
+    "plugin:react/jsx-runtime",
+    "plugin:react-hooks/recommended",
     "prettier",
+    "plugin:import/recommended",
     "plugin:tailwindcss/recommended"
   ],
-  "plugins": ["tailwindcss"],
+  "plugins": ["import", "@typescript-eslint"],
   "rules": {
-    "tailwindcss/no-custom-classname": "off"
+    "react/button-has-type": "error",
+    "react/hook-use-state": "error",
+    "react/no-danger": "error",
+    "react/prop-types": "error",
+    "react/jsx-sort-props": [
+      "error",
+      {
+        "callbacksLast": true,
+        "shorthandFirst": true,
+        "shorthandLast": false,
+        "ignoreCase": true,
+        "noSortAlphabetically": false,
+        "reservedFirst": true
+      }
+    ],
+    "import/order": [
+      "error",
+      {
+        "groups": ["builtin", "external", "internal"],
+        "pathGroups": [
+          {
+            "pattern": "react",
+            "group": "external",
+            "position": "before"
+          }
+        ],
+        "pathGroupsExcludedImportTypes": ["react"],
+        "newlines-between": "never",
+        "alphabetize": {
+          "order": "asc",
+          "caseInsensitive": true
+        }
+      }
+    ],
+    "import/no-duplicates": "error",
+    "import/no-unresolved": "off",
+    "tailwindcss/classnames-order": [
+      "error",
+      {
+        "callees": ["clsx", "cn"]
+      }
+    ]
   },
   "settings": {
+    "react": {
+      "version": "detect"
+    },
     "tailwindcss": {
       "callees": ["cn", "cva"],
       "config": "tailwind.config.js"
+    },
+    "import/parsers": {
+      "@typescript-eslint/parser": [".ts", ".tsx"]
+    },
+    "import/resolver": {
+      "typescript": {
+        "alwaysTryTypes": true
+      }
     }
   },
   "overrides": [

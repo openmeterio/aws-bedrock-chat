@@ -1,4 +1,4 @@
-import { getChats, removeChat, shareChat } from '@/app/actions'
+import { getChats, removeChat } from '@/app/actions'
 import { SidebarActions } from '@/components/sidebar-actions'
 import { SidebarItem } from '@/components/sidebar-item'
 
@@ -14,16 +14,12 @@ export async function SidebarList({ userId }: SidebarListProps) {
       {chats?.length ? (
         <div className="space-y-2 px-2">
           {chats.map(
-            chat =>
+            (chat) =>
               chat && (
                 <SidebarItem key={chat?.id} chat={chat}>
-                  <SidebarActions
-                    chat={chat}
-                    removeChat={removeChat}
-                    shareChat={shareChat}
-                  />
+                  <SidebarActions chat={chat} removeChat={removeChat} />
                 </SidebarItem>
-              )
+              ),
           )}
         </div>
       ) : (

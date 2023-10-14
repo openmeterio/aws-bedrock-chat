@@ -1,67 +1,147 @@
-import { kv } from '@vercel/kv'
-import { OpenAIStream, StreamingTextResponse } from 'ai'
-import { Configuration, OpenAIApi } from 'openai-edge'
-
-import { auth } from '@/auth'
+import { Event, OpenMeter } from '@openmeter/sdk'
+import { ChatRequest, Message, StreamingTextResponse } from 'ai'
+import dayjs from 'dayjs'
+import {
+  ChatBedrock,
+  convertMessagesToPromptAnthropic,
+} from 'langchain/chat_models/bedrock'
+import { AIMessage, ChatMessage, HumanMessage } from 'langchain/schema'
+import { BytesOutputParser } from 'langchain/schema/output_parser'
+import { getServerSession } from 'next-auth'
+import { saveChat } from '@/app/actions'
+import { authOptions } from '@/auth'
 import { nanoid } from '@/lib/utils'
 
-export const runtime = 'edge'
+let om: OpenMeter | undefined
+if (process.env.OPENMETER_BASE_URL) {
+  om = new OpenMeter({
+    baseUrl: process.env.OPENMETER_BASE_URL,
+    token: process.env.OPENMETER_TOKEN,
+  })
+}
 
-const configuration = new Configuration({
-  apiKey: process.env.OPENAI_API_KEY
-})
-
-const openai = new OpenAIApi(configuration)
+let TOKEN_LIMIT: number | undefined
+if (process.env.TOKEN_LIMIT) {
+  TOKEN_LIMIT = Number.parseInt(process.env.TOKEN_LIMIT, 10)
+}
 
 export async function POST(req: Request) {
-  const json = await req.json()
-  const { messages, previewToken } = json
-  const userId = (await auth())?.user.id
-
+  const session = await getServerSession(authOptions)
+  const userId = session?.user.id
   if (!userId) {
     return new Response('Unauthorized', {
-      status: 401
+      status: 401,
     })
   }
 
-  if (previewToken) {
-    configuration.apiKey = previewToken
-  }
-
-  const res = await openai.createChatCompletion({
-    model: 'gpt-3.5-turbo',
-    messages,
-    temperature: 0.7,
-    stream: true
-  })
-
-  const stream = OpenAIStream(res, {
-    async onCompletion(completion) {
-      const title = json.messages[0].content.substring(0, 100)
-      const id = json.id ?? nanoid()
-      const createdAt = Date.now()
-      const path = `/chat/${id}`
-      const payload = {
-        id,
-        title,
-        userId,
-        createdAt,
-        path,
-        messages: [
-          ...messages,
-          {
-            content: completion,
-            role: 'assistant'
-          }
-        ]
-      }
-      await kv.hmset(`chat:${id}`, payload)
-      await kv.zadd(`user:chat:${userId}`, {
-        score: createdAt,
-        member: `chat:${id}`
+  if (TOKEN_LIMIT) {
+    const from = dayjs().subtract(1, 'day').toDate()
+    const to = dayjs().toDate()
+    const usageResp = await om?.meters.query('total_tokens', {
+      from,
+      to,
+      subject: [userId],
+    })
+    const usage = usageResp?.data.find((u) => u.subject === userId)?.value ?? 0
+    if (usage >= TOKEN_LIMIT) {
+      console.log('Usage limit reached', usage)
+      return new Response('Usage limit reached', {
+        status: 429,
+        headers: {
+          'retry-after': '3600',
+        },
       })
     }
+  }
+
+  const { id = nanoid(), messages }: ChatRequest & { id?: string } =
+    await req.json()
+  const createdAt = new Date()
+
+  const llm = new ChatBedrock({
+    temperature: 0.1,
+    model: 'anthropic.claude-v2',
+    region: process.env.AWS_REGION,
+    maxTokens: 2048 * 2,
   })
 
-  return new StreamingTextResponse(stream)
+  const propmt = messages.map(convertVercelMessageToLangChainMessage)
+
+  llm.callbacks = [
+    {
+      async handleLLMEnd({ generations }, runId) {
+        // save chat
+        await saveChat({
+          id,
+          userId,
+          title: messages[0].content.substring(0, 100),
+          path: `/chat/${id}`,
+          createdAt,
+          messages: messages.concat(
+            generations.flat().map((g) => ({
+              id: nanoid(),
+              role: 'assistant',
+              content: g.text,
+            })),
+          ),
+        })
+
+        // ingest usage to OpenMeter
+        try {
+          const input = convertMessagesToPromptAnthropic(propmt)
+          const output = generations
+            .flat()
+            .map((g) => g.text)
+            .join('')
+          const data = {
+            input: await llm.getNumTokens(input),
+            output: await llm.getNumTokens(output),
+          }
+
+          const event: Event = {
+            id: runId,
+            subject: userId,
+            type: 'chat',
+            source: 'langchain',
+            time: createdAt,
+            data: {
+              ...data,
+              total: data.input + data.output,
+              model: llm.model,
+            },
+          }
+
+          await om?.events.ingest(event)
+          console.log('Usage event', event)
+        } catch (err) {
+          console.error('Failed to ingest event to OpenMeter', err)
+        }
+      },
+    },
+  ]
+
+  try {
+    const outputParser = new BytesOutputParser()
+    const chain = llm.bind({ signal: req.signal }).pipe(outputParser)
+    const stream = await chain.stream(propmt)
+
+    return new StreamingTextResponse(stream)
+  } catch (err) {
+    console.error(err)
+    return new Response('Internal Server Error', {
+      status: 500,
+    })
+  }
+}
+
+function convertVercelMessageToLangChainMessage(message: Message) {
+  if (message.role === 'user') {
+    return new HumanMessage(message)
+  }
+
+  if (message.role === 'assistant') {
+    return new AIMessage(message)
+  }
+
+  return new ChatMessage(message)
 }

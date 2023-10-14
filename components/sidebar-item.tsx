@@ -2,16 +2,15 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-
-import { type Chat } from '@/lib/types'
-import { cn } from '@/lib/utils'
 import { buttonVariants } from '@/components/ui/button'
 import { IconMessage, IconUsers } from '@/components/ui/icons'
 import {
   Tooltip,
   TooltipContent,
-  TooltipTrigger
+  TooltipTrigger,
 } from '@/components/ui/tooltip'
+import { type Chat } from '@/lib/types'
+import { cn } from '@/lib/utils'
 
 interface SidebarItemProps {
   chat: Chat
@@ -30,8 +29,8 @@ export function SidebarItem({ chat, children }: SidebarItemProps) {
         {chat.sharePath ? (
           <Tooltip delayDuration={1000}>
             <TooltipTrigger
-              tabIndex={-1}
               className="focus:bg-muted focus:ring-1 focus:ring-ring"
+              tabIndex={-1}
             >
               <IconUsers className="mr-2" />
             </TooltipTrigger>
@@ -42,12 +41,12 @@ export function SidebarItem({ chat, children }: SidebarItemProps) {
         )}
       </div>
       <Link
-        href={chat.path}
         className={cn(
           buttonVariants({ variant: 'ghost' }),
           'group w-full pl-8 pr-16',
-          isActive && 'bg-accent'
+          isActive && 'bg-accent',
         )}
+        href={chat.path}
       >
         <div
           className="relative max-h-5 flex-1 select-none overflow-hidden text-ellipsis break-all"
